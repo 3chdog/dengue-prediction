@@ -3,6 +3,13 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# dataset
+*.csv
+
+# result
+*.png
+*.pth
+
 # C extensions
 *.so
 
