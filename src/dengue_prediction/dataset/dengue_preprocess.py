@@ -1,6 +1,6 @@
 import pandas as pd
 
-from .county_query import COUNTY_LIST
+from .county_query import COUNTY_LIST, COUNTY_FROM_TOWN
 
 # 取得有值與無值的索引
 def get_indexes_split_by_none(df: pd.DataFrame, column_name: str) -> tuple[list[int], list[int]]:
@@ -64,10 +64,29 @@ def check_samples_in_county_list(df: pd.DataFrame, idx_list: list, keyword: str 
         print(f"[縣市檢查] 所有樣本的縣市皆在 COUNTY_LIST 中")
 
 # 填值：利用 '來源欄位' 填補 '目標欄位' 的值 (支援'來源欄位'的值的轉換)
-def fill_values(df: pd.DataFrame, target_column: str, input_column: str, transform_dict: dict = None) -> pd.DataFrame:
-    for i in range(len(df[target_column])):
-        if pd.isna(df[target_column].iloc[i]) and not pd.isna(df[input_column].iloc[i]):
-            df.at[i, target_column] = df[input_column].iloc[i]
+def fill_values(df: pd.DataFrame, target_indexes: list[int], target_column: str, input_column: str, transform_dict: dict = None, verbose: bool = False) -> pd.DataFrame:
+    for i in target_indexes:
+        # 檢查目標欄位
+        if not pd.isna(df[target_column].iloc[i]) and verbose:
+            print(f"[填值警告] 索引 {i} 的 '{target_column}' 欄位已有值")
+
+        # 檢查來源欄位
+        if pd.isna(df[input_column].iloc[i]):
+            if verbose:
+                print(f"[填值跳過] 索引 {i} 的 '{input_column}' 欄位無值，無法填補 '{target_column}' 欄位")
+            continue
+
+        # 進行轉換（如果有提供轉換字典）
+        input_value = df[input_column].iloc[i]
+        if transform_dict and input_value in transform_dict:
+            input_value = transform_dict[input_value]
+        df.at[i, target_column] = input_value
+
+        # 確認填值成功
+        if verbose:
+            print(f"[填值成功] 索引 {i} 的 '{target_column}' 欄位已填補為 '{input_value}'")
+        assert df.iloc[i][target_column] is not None, f"[填值錯誤] 索引 {i} 的 '{target_column}' 欄位填補失敗"
+    print(f"[填值完成] 共填補 {len(target_indexes)} 筆資料，將 '{input_column}' 值填於 '{target_column}' 欄位")
     return df
 
 # 主要的前處理函式
@@ -91,11 +110,38 @@ def dengue_preprocess(csv_file: str, period: str = 'monthly'):
     check_indexes_no_duplicate(
         [
             idx_with_infection_county,
+            idx_without_infection_county_but_living_county,
             idx_without_infection_county_neither_living_county,
-            idx_without_infection_county_but_living_county
         ]
     )
 
+    # 利用 '居住縣市' 欄位填補 '感染縣市' 欄位的空值
+    df = fill_values(
+        df,
+        idx_without_infection_county_but_living_county,
+        target_column='感染縣市',
+        input_column='居住縣市',
+        transform_dict=None,
+        # verbose=True
+    )
+
+    df = fill_values(
+        df,
+        idx_without_infection_county_neither_living_county,
+        target_column='感染縣市',
+        input_column='居住鄉鎮',
+        transform_dict=COUNTY_FROM_TOWN,
+        # verbose=True
+    )
+
+    # 保留必要的欄位
+    columns_to_keep = ['發病日', '感染縣市']
+    df = df[columns_to_keep]
+
+    # 最後檢查保留欄位是否有空值
+    for column in columns_to_keep:
+        _, idx_without_value = get_indexes_split_by_none(df, column)
+        assert len(idx_without_value) == 0, f"[最終檢查錯誤] 欄位 '{column}' 中仍有空值"
 
 if __name__ == "__main__":
     csv_file = 'Dengue_Daily.csv'
