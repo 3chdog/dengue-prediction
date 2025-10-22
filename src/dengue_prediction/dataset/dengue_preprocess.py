@@ -1,9 +1,9 @@
 import pandas as pd
 
-from county_query import COUNTY_LIST
+from .county_query import COUNTY_LIST
 
 # 取得有值與無值的索引
-def get_indexes_split_by_none(df: pd.DataFrame, column_name: str):
+def get_indexes_split_by_none(df: pd.DataFrame, column_name: str) -> tuple[list[int], list[int]]:
     idx_with_value = df[~pd.isna(df[column_name])].index.tolist()
     print(f"[{column_name}] 有值的部分共有 {len(idx_with_value)} 筆資料")
     idx_without_value = df[pd.isna(df[column_name])].index.tolist()
@@ -22,6 +22,21 @@ def remove_travelers_entering_samples(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop(idx_to_remove).reset_index(drop=True)
     print(f"總共剩下 {len(df)} 筆資料")
     return df
+
+# 檢查索引是否有重複
+def check_indexes_no_duplicate(list_of_indexes: list[list[int]]) -> bool:
+    list_of_sets = [set(idx_list) for idx_list in list_of_indexes]
+    is_duplicate = False
+    for one_set in list_of_sets:
+        others = [s for s in list_of_sets if s != one_set]
+        union_of_others = set().union(*others)
+        if one_set & union_of_others:
+            is_duplicate = True
+            print(f"發現重複的索引：{one_set & union_of_others}")
+    if not is_duplicate:
+        total_count = sum([len(idx_list) for idx_list in list_of_indexes])
+        print(f"所有索引皆無重複，總計 {total_count} 筆資料")
+    return is_duplicate
 
 # 檢查 '發病日' 欄位的年份是否在合理範圍內
 def check_reported_date_range(df: pd.DataFrame, start_year: int, end_year: int) -> pd.DataFrame:
@@ -48,6 +63,13 @@ def check_samples_in_county_list(df: pd.DataFrame, idx_list: list, keyword: str 
     else:
         print(f"[縣市檢查] 所有樣本的縣市皆在 COUNTY_LIST 中")
 
+# 填值：利用 '來源欄位' 填補 '目標欄位' 的值 (支援'來源欄位'的值的轉換)
+def fill_values(df: pd.DataFrame, target_column: str, input_column: str, transform_dict: dict = None) -> pd.DataFrame:
+    for i in range(len(df[target_column])):
+        if pd.isna(df[target_column].iloc[i]) and not pd.isna(df[input_column].iloc[i]):
+            df.at[i, target_column] = df[input_column].iloc[i]
+    return df
+
 # 主要的前處理函式
 def dengue_preprocess(csv_file: str, period: str = 'monthly'):
     df = pd.read_csv(csv_file, encoding='utf-8-sig')
@@ -57,6 +79,23 @@ def dengue_preprocess(csv_file: str, period: str = 'monthly'):
     # 剩下的樣本分成 '感染縣市'有值 與 '感染縣市'無值 兩部分
     idx_with_infection_county, idx_without_infection_county = get_indexes_split_by_none(df, '感染縣市')
     check_samples_in_county_list(df, idx_with_infection_county)
+
+    # 將 '感染縣市'無值 的部分分成 '居住縣市'有值 與 '居住縣市'無值 兩部分
+    df_no_infection_county = df.loc[idx_without_infection_county]
+    (
+        idx_without_infection_county_but_living_county,
+        idx_without_infection_county_neither_living_county
+    ) = get_indexes_split_by_none(df_no_infection_county, '居住縣市')
+
+    # 檢查目前分成三群的索引是否有重複
+    check_indexes_no_duplicate(
+        [
+            idx_with_infection_county,
+            idx_without_infection_county_neither_living_county,
+            idx_without_infection_county_but_living_county
+        ]
+    )
+
 
 if __name__ == "__main__":
     csv_file = 'Dengue_Daily.csv'
