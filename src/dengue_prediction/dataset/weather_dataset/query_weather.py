@@ -2,6 +2,7 @@ from playwright.sync_api import sync_playwright
 from datetime import datetime, timedelta
 import time
 import os
+import re
 from tqdm import tqdm
 
 class TqdmWrapper(tqdm):
@@ -75,9 +76,10 @@ def run(playwright):
     
     print("已切換到年報表模式")
     time.sleep(2)
-    
+
     # 處理下載
-    for year in TqdmWrapper(years_list, desc="下載進度", ncols=200, unit='file'):
+    # for year in TqdmWrapper(years_list, desc="下載進度", ncols=200, unit='file'):
+    for year in years_list:
         # 構建預期的檔名
         expected_filename = f"{station_code}-{year}.csv"
         expected_filepath = os.path.join(download_path, expected_filename)
@@ -85,97 +87,151 @@ def run(playwright):
         # 檢查檔案是否存在
         if os.path.exists(expected_filepath):
             print(f"\r檔案 {expected_filename} 已存在,跳過下載。", end=" ")
+            time.sleep(1)
             continue
         
         # 選擇年份
         print(f"\r正在處理年份: {year}", end=" ")
-        
-        # ===== 修改部分開始 =====
-        # 方法1: 使用 placeholder 精確定位第一個「請選擇年分」輸入框
+
         try:
-            try:
-                date_input = page.get_by_placeholder("2025").first
-            except:
-                date_input = page.get_by_placeholder("2025").first
-            date_input.click()
-            print(f"\r已點擊日期選擇器", end=" ")
-            time.sleep(1)
+            # # 1️⃣ 點擊「觀測時間」右邊的年選擇器
+            # year_selectors = page.locator("div.datetime-tool.datetime-tool-year input.vdatetime-input")
+            # print("偵測到年分選擇器數量:", year_selectors.count())
+            # year_selector = None
+            # for i in range(year_selectors.count()):
+            #     try:
+            #         year_selector = year_selectors.nth(i)
+            #         text = year_selector.input_value()
+            #         print(f"嘗試第 {i} 個選擇器: {text}")
+            #         year_selector.click(timeout=5000)
+            #         time.sleep(0.5)
+            #         print(f"✅ 已點擊第 {i} 個選擇器")
+            #         break
+            #     except Exception as e:
+            #         print(f"❌ 點擊第 {i} 個選擇器失敗，嘗試下一個。")
+            #         # print(f"❌ 點擊第 {i} 個選擇器失敗: {e}")
+  
+            # 1️⃣ 點擊「觀測時間」右邊的年選擇器
+            year_selector = page.locator("div.datetime-tool.datetime-tool-year input.vdatetime-input").nth(2)
+            year_selector.click(timeout=10000)
+            time.sleep(0.5)
+            print("已點擊年份選擇器")
+
             
-            # 等待年份選擇器彈窗出現
-            page.wait_for_selector(".vdatetime-year-picker", timeout=5000)
+            # 2️⃣ 等待彈出視窗 (.vdatetime-popup) 顯示
+            page.wait_for_selector(".vdatetime-popup", state="visible", timeout=5000)
+            time.sleep(0.5)
+            print("✅ 年份選擇彈窗已顯示")
             
-            # 尋找目標年份並點擊
-            year_item = page.locator(f".vdatetime-year-picker__item").filter(has_text=str(year)).first
+            # 3️⃣ 找到對應年份（可能要滾動才能出現）
+            year_item_locator = page.locator(f".vdatetime-year-picker__item >> text={year}")
+            time.sleep(0.5)
+            print("✅ 尋找年份項目定位器完成")
             
-            if year_item.count() > 0:
-                # 滾動到目標年份
-                year_item.scroll_into_view_if_needed()
-                time.sleep(0.5)
-                # 點擊年份
-                year_item.click()
-                print(f"\r已選擇年份: {year}", end=" ")
-                time.sleep(1)
-                
-                # 點擊 Continue 按鈕
-                continue_btn = page.locator(".vdatetime-popup__actions__button--confirm")
-                if continue_btn.count() > 0:
-                    continue_btn.click()
-                    print(f"\r已確認年份選擇", end=" ")
-                    time.sleep(1)
-            else:
-                print(f"\r找不到年份 {year},跳過", end=" ")
-                # 關閉彈出視窗
+            # 滾動直到找到
+            for _ in range(10):
+                if year_item_locator.count() > 0:
+                    break
+                page.mouse.wheel(0, 200)  # 模擬滾動
+                time.sleep(0.3)
+            
+            if year_item_locator.count() == 0:
+                print(f"⚠️ 無法找到年份 {year}，跳過")
                 page.keyboard.press("Escape")
-                time.sleep(0.5)
                 continue
-                
+
+            # 點擊年份
+            year_item_locator.first.click()
+            print(f"✅ 已點擊年份 {year}")
+
+            # 4️⃣ 點擊 Continue 按鈕 (如果有的話)
+            continue_btn = page.locator(".vdatetime-popup__actions__button--confirm", has_text="Continue")
+            continue_btn.click()
+            print("已確認年份")
+
+            # 5️⃣ 等待彈窗關閉
+            page.wait_for_selector(".vdatetime-popup", state="hidden", timeout=5000)
+            time.sleep(0.5)
+
         except Exception as e:
-            print(f"\r選擇年份時發生錯誤: {e}", end=" ")
-            # 嘗試方法2: 使用 datetime-tool-year 類別
-            try:
-                print(f"\r嘗試方法2...", end=" ")
-                date_tool = page.locator(".datetime-tool-year").first
-                date_tool.click()
-                time.sleep(1)
-                
-                # 等待並選擇年份
-                page.wait_for_selector(".vdatetime-year-picker", timeout=5000)
-                year_item = page.locator(f".vdatetime-year-picker__item").filter(has_text=str(year)).first
-                
-                if year_item.count() > 0:
-                    year_item.scroll_into_view_if_needed()
-                    time.sleep(0.5)
-                    year_item.click()
-                    time.sleep(1)
-                    
-                    continue_btn = page.locator(".vdatetime-popup__actions__button--confirm")
-                    if continue_btn.count() > 0:
-                        continue_btn.click()
-                        time.sleep(1)
-                else:
-                    print(f"\r找不到年份 {year},跳過", end=" ")
-                    page.keyboard.press("Escape")
-                    time.sleep(0.5)
-                    continue
-                    
-            except Exception as e2:
-                print(f"\r方法2也失敗: {e2}", end=" ")
-                page.keyboard.press("Escape")
-                time.sleep(0.5)
-                continue
-        # ===== 修改部分結束 =====
+            print(f"❌ 選擇年份失敗: {e}")
+            page.keyboard.press("Escape")
+            continue
         
         # 執行下載操作
         print(f"\r正在下載: {expected_filename}", end=" ")
         time.sleep(1)
-        
         with page.expect_download() as download_info:
-            # 點擊 CSV 下載按鈕
-            page.locator(".lightbox-tool-type-ctrl-btn-group > div").first.click()
+            # page.locator(".lightbox-tool-type-ctrl-btn-group > div").first.click()
+            # page.wait_for_selector(".lightbox-tool-type-ctrl-btn-group > div", state="visible", timeout=10000)
+            # page.locator(".lightbox-tool-type-ctrl-btn-group > div").first.click()
+            # # download_btn = page.locator('div.lightbox-tool-type-ctrl-btn', has_text="CSV下載")
+            # download_btn = page.locator('div.lightbox-tool-type-ctrl-btn', has_text=re.compile("CSV\s*下載"))
+            # download_btn.wait_for(state="visible", timeout=10000)
+            print("✅ 找到 CSV下載 按鈕，準備點擊")
+            # download_btn.click()
+
+            download_btn_selectors = page.locator("div.lightbox-tool-type-ctrl-btn", has_text="CSV下載")
+            print("偵測到下載按鈕數量:", download_btn_selectors.count())
+            btn_selector = None
+            for i in range(download_btn_selectors.count()):
+                try:
+                    # 1️⃣ 找到該元素（用 innerText 匹配）
+                    btn_selector = download_btn_selectors.nth(i)
+                    text = btn_selector.inner_text()
+                    print(f"嘗試第 {i} 個按鈕: {text}", end=" ")
+                    btn_selector.click(timeout=5000)
+                    time.sleep(0.5)
+                    print(f"\n✅ 已點擊第 {i} 個按鈕")
+
+                    # 2️⃣ 確保元素存在
+                    btn_selector.wait_for(state="attached", timeout=5000)
+                    print("✅ CSV下載按鈕已找到，下一步使用 JS 強制觸發 click()")
+
+                    # 3️⃣ 透過 JS 點擊，不經由 Playwright 的 visibility 檢查
+                    page.evaluate("(el) => el.click()", btn_selector.element_handle())
+                    print("✅ 已透過 JS 強制觸發 click()")
+                    break
+                except Exception as e:
+                    print(f"❌ 點擊第 {i} 個按鈕失敗，嘗試下一個。")
+                    # print(f"❌ 點擊第 {i} 個按鈕失敗: {e}")
+
+
+
+
+
+            # # 1️⃣ 找到該元素（用 innerText 匹配）
+            # download_btn = page.locator("div.lightbox-tool-type-ctrl-btn", has_text="CSV下載")
+
+            # # 2️⃣ 確保元素存在
+            # download_btn.wait_for(state="attached", timeout=5000)
+            # print("✅ CSV下載按鈕已找到，使用 JS 強制觸發 click()")
+
+            # # 3️⃣ 透過 JS 點擊，不經由 Playwright 的 visibility 檢查
+            # page.evaluate("(el) => el.click()", download_btn.element_handle())
+
+            # # 4️⃣ 若網站自動下載，則這裡等待下載事件
+            # with page.expect_download() as download_info:
+            #     pass  # 讓 Playwright 監聽
             download = download_info.value
-            download.save_as(os.path.join(download_path, download.suggested_filename))
-            print("\r" + "檔案下載完成: " + download.suggested_filename, end=" ")
-            time.sleep(2)
+            download.save_as(download_path + "/" + download.suggested_filename)
+            print(f"✅ 已下載: {download.suggested_filename}")
+
+
+
+
+
+
+            # download = download_info.value
+            # download.save_as(download_path+"/" +  download.suggested_filename)  # 儲存檔案
+            # #print(download.url)  # 獲取下載的url地址
+            # # 這一步只是下載下來，生成一個隨機uuid值儲存，程式碼執行完會自動清除
+            # print("\r"+"檔案不存在，以下載 : "+download.suggested_filename,end=" ")  # 獲取下載的檔名
+            # time.sleep(1)
+            print("BEFORE END")
+            # page.locator("div:nth-child(5) > .lightbox-tool-type-ctrl > .lightbox-tool-type-ctrl-form > label > .datetime-tool > div").first.click()
+            # print("ENDDDING")
+            # time.sleep(2)
     
     print("\n所有檔案下載完成!")
     context.close()
