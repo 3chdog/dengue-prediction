@@ -91,6 +91,12 @@ def fill_values(df: pd.DataFrame, target_indexes: list[int], target_column: str,
 
 # 主要的前處理函式
 def dengue_preprocess(csv_file: str, period: str = 'monthly'):
+    """
+     1. 移除境外移入的資料
+     2. 檢查發病日年份範圍
+     3. 分析並填補感染縣市欄位的空值
+     4. 最終檢查保留欄位是否有空值
+    """
     df = pd.read_csv(csv_file, encoding='utf-8-sig')
     df = remove_travelers_entering_samples(df)
     df = check_reported_date_range(df, 1998, 2024)
